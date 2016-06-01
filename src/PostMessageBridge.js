@@ -15,43 +15,26 @@ class Request {
 
 module.exports = class {
 
-  constructor ({ source = typeof window === 'undefined' ? null : window, origin = '*',  timeout = 100 }) {
+  constructor (target, { handlers = new Map(), source = typeof window === 'undefined' ? null : window, origin = '*',  timeout = 100 }) {
 
     // Validate options.
-    if (!source || !source.addEventListener || !source.postMessage) throw new TypeError('Source must be a DOM window.');
+    if (!target || !target.postMessage) throw new TypeError('Source must be a DOM window.');
+    if (!(handlers instanceof Map)) throw new TypeError('Handlers must be a map.');
+    if (!source || !source.addEventListener) throw new TypeError('Source must be a DOM window.');
     if (!origin || typeof origin !== 'string') throw new TypeError('Origin must be a non empty string.');
     if (isNaN(parseFloat(timeout)) || !isFinite(timeout) || timeout < 0) throw new TypeError('Timeout must be a number greater than 0.');
 
     // Assign options.
+    this._target = target;
     this._source = source;
+    this._handlers = handlers;
     this._origin = origin;
     this._timeout = timeout;
 
     // Initialize.
-    this._target = null;
-    this._handlers = new Map();
     this._requests = new Map();
-    this._listener = event => this._onMessage(event);
+    this._source.addEventListener('message', event => this._onMessage(event), false);
 
-  }
-
-  connect (target) {
-    this.disconnect();
-    if (!target || !target.addEventListener || !target.postMessage) throw new TypeError('Target must be a DOM window.');
-    this._target = target;
-    this._target.addEventListener('message', this._listener, false);
-  }
-
-  disconnect () {
-    if (this._target) this._target.removeEventListener('message', this._listener);
-  }
-
-  register (name, handler) {
-    this._handlers.set(name, handler);
-  }
-
-  unregister (name) {
-    this._handlers.delete(name);
   }
 
   async request (name, payload, transfer=[]) {
@@ -109,17 +92,11 @@ module.exports = class {
   }
 
   _onMessage ({ source, origin, data }) {
-    if (!this._target || source !== this._target || (this._origin !== '*' && origin !== this._origin)) {
-      return this._source.console.debug('Dropping message from unknown source or origin');
-    } else if (!data || !data.type) {
-      return this._source.console.debug('Dropping non-conforming message.');
-    }
-
-    if (data.type === 'request') return this._onRequest(data);
+    if (source !== this._target || (this._origin !== '*' && origin !== this._origin) || !data || !data.type) return;
+    else if (data.type === 'request') return this._onRequest(data);
     else if (data.type === 'receipt') return this._onReceipt(data);
     else if (data.type === 'response') return this._onResponse(data);
     else if (data.type === 'error') return this._onError(data);
-    else this._source.console.debug('Dropping message with unknown type.');
   }
 
 
