@@ -1,3 +1,3 @@
 'use strict';
 
-module.exports = require('./dist/node/');
+module.exports = require('./dist/bridge-node');
