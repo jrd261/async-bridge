@@ -1,7 +1,5 @@
 'use strict';
 
-var _typeof = typeof Symbol === "function" && typeof Symbol.iterator === "symbol" ? function (obj) { return typeof obj; } : function (obj) { return obj && typeof Symbol === "function" && obj.constructor === Symbol ? "symbol" : typeof obj; };
-
 var _createClass = function () { function defineProperties(target, props) { for (var i = 0; i < props.length; i++) { var descriptor = props[i]; descriptor.enumerable = descriptor.enumerable || false; descriptor.configurable = true; if ("value" in descriptor) descriptor.writable = true; Object.defineProperty(target, descriptor.key, descriptor); } } return function (Constructor, protoProps, staticProps) { if (protoProps) defineProperties(Constructor.prototype, protoProps); if (staticProps) defineProperties(Constructor, staticProps); return Constructor; }; }();
 
 function _asyncToGenerator(fn) { return function () { var gen = fn.apply(this, arguments); return new Promise(function (resolve, reject) { function step(key, arg) { try { var info = gen[key](arg); var value = info.value; } catch (error) { reject(error); return; } if (info.done) { resolve(value); } else { return Promise.resolve(value).then(function (value) { return step("next", value); }, function (err) { return step("throw", err); }); } } return step("next"); }); }; }
@@ -16,18 +14,33 @@ var Unhandled = function Unhandled() {
   this.stack = new Error().stack;
 };
 
-var Timeout = function Timeout() {
-  _classCallCheck(this, Timeout);
+var __UnhandledInternal__ = function __UnhandledInternal__() {
+  _classCallCheck(this, __UnhandledInternal__);
 
-  this.name = 'Timeout';
-  this.message = 'The request timed out.';
+  this.name = '__UnhandledInternal__';
+  this.message = 'The request was unhandled';
+  this.stack = new Error().stack;
+};
+
+var ReceiptTimeout = function ReceiptTimeout() {
+  _classCallCheck(this, ReceiptTimeout);
+
+  this.name = 'ReceiptTimeout';
+  this.message = 'The request timed out waiting for a receipt.';
+  this.stack = new Error().stack;
+};
+
+var RequestTimeout = function RequestTimeout() {
+  _classCallCheck(this, RequestTimeout);
+
+  this.name = 'RequestTimeout';
+  this.message = 'The request timed out waiting for a response';
   this.stack = new Error().stack;
 };
 
 function Request(_ref) {
-  var timeout = _ref.timeout;
-  var setTimeout = _ref.setTimeout;
-  var clearTimeout = _ref.clearTimeout;
+  var receiptTimeout = _ref.receiptTimeout;
+  var requestTimeout = _ref.requestTimeout;
 
 
   var resolve = void 0,
@@ -35,31 +48,33 @@ function Request(_ref) {
   var promise = new Promise(function (a, b) {
     resolve = a;reject = b;
   });
-  var timeout_ = setTimeout(function () {
-    return reject(new Timeout());
-  }, timeout);
 
-  function onReceipt() {
-    clearTimeout(timeout_);
-  }
-  function onResponse(_ref2) {
-    var payload = _ref2.payload;
-    resolve(payload);
-  }
-
-  function onError(_ref3) {
-    var name = _ref3.name;
-    var message = _ref3.message;
-
-    if (name === 'Unhandled') return reject(new Unhandled());
-    var error = new Error();
-    error.name = name;
-    error.message = message;
-    reject(error);
-  }
+  var receiptTimeoutId = setTimeout(function () {
+    return reject(new ReceiptTimeout());
+  }, receiptTimeout);
+  var requestTimeoutId = setTimeout(function () {
+    return reject(new RequestTimeout());
+  }, requestTimeout);
 
   function _receive(message) {
-    if (message.type === 'receipt') onReceipt(message);else if (message.type === 'response') onResponse(message);else if (message.type === 'error') onError(message);
+    var type = message.type;
+    var payload = message.payload;
+
+    if (type === 'receipt') {
+      clearTimeout(receiptTimeoutId);
+    } else if (type === 'response') {
+      clearTimeout(requestTimeoutId);
+      resolve(payload);
+    } else if (type === 'error') {
+      if (message.name === '__UnhandledInternal__') {
+        reject(new Unhandled());
+      } else {
+        var error = new Error();
+        error.name = message.name;
+        error.message = message.message;
+        reject(error);
+      }
+    }
   }
 
   return new (function () {
@@ -83,16 +98,20 @@ function Request(_ref) {
   }())();
 }
 
-function Bridge(_ref4) {
+function Bridge(_ref2) {
   var _request = function () {
-    var ref = _asyncToGenerator(regeneratorRuntime.mark(function _callee(name, payload) {
+    var ref = _asyncToGenerator(regeneratorRuntime.mark(function _callee(name, payload, _ref3) {
+      var _ref3$receiptTimeout = _ref3.receiptTimeout;
+      var receiptTimeout = _ref3$receiptTimeout === undefined ? defaultReceiptTimeout : _ref3$receiptTimeout;
+      var _ref3$requestTimeout = _ref3.requestTimeout;
+      var requestTimeout = _ref3$requestTimeout === undefined ? defaultRequestTimeout : _ref3$requestTimeout;
       var id, request;
       return regeneratorRuntime.wrap(function _callee$(_context) {
         while (1) {
           switch (_context.prev = _context.next) {
             case 0:
               id = Math.random();
-              request = new Request({ timeout: timeout, setTimeout: setTimeout, clearTimeout: clearTimeout });
+              request = new Request({ receiptTimeout: receiptTimeout, requestTimeout: requestTimeout });
 
               requests.set(id, request);
               send({ id: id, name: name, payload: payload, type: 'request' });
@@ -122,23 +141,23 @@ function Bridge(_ref4) {
       }, _callee, this, [[4, 10, 13, 16]]);
     }));
 
-    return function _request(_x, _x2) {
+    return function _request(_x, _x2, _x3) {
       return ref.apply(this, arguments);
     };
   }();
 
   var onRequest = function () {
-    var ref = _asyncToGenerator(regeneratorRuntime.mark(function _callee2(_ref5) {
-      var id = _ref5.id;
-      var name = _ref5.name;
-      var payload = _ref5.payload;
+    var ref = _asyncToGenerator(regeneratorRuntime.mark(function _callee2(_ref4) {
+      var id = _ref4.id;
+      var name = _ref4.name;
+      var payload = _ref4.payload;
       var handler, response;
       return regeneratorRuntime.wrap(function _callee2$(_context2) {
         while (1) {
           switch (_context2.prev = _context2.next) {
             case 0:
               handler = handlers.get(name) || function () {
-                throw new Unhandled();
+                throw new __UnhandledInternal__();
               };
 
               response = void 0;
@@ -171,15 +190,14 @@ function Bridge(_ref4) {
       }, _callee2, this, [[3, 9]]);
     }));
 
-    return function onRequest(_x3) {
+    return function onRequest(_x4) {
       return ref.apply(this, arguments);
     };
   }();
 
-  var timeout = _ref4.timeout;
-  var send = _ref4.send;
-  var setTimeout = _ref4.setTimeout;
-  var clearTimeout = _ref4.clearTimeout;
+  var defaultReceiptTimeout = _ref2.defaultReceiptTimeout;
+  var defaultRequestTimeout = _ref2.defaultRequestTimeout;
+  var send = _ref2.send;
 
 
   var requests = new Map();
@@ -197,7 +215,8 @@ function Bridge(_ref4) {
     _createClass(_class2, [{
       key: 'request',
       value: function request(name, payload) {
-        return _request(name, payload);
+        var options = arguments.length <= 2 || arguments[2] === undefined ? {} : arguments[2];
+        return _request(name, payload, options);
       }
     }, {
       key: 'respond',
@@ -212,7 +231,7 @@ function Bridge(_ref4) {
     }, {
       key: 'exceptions',
       get: function get() {
-        return { Unhandled: Unhandled, Timeout: Timeout };
+        return { Unhandled: Unhandled, ReceiptTimeout: ReceiptTimeout, RequestTimeout: RequestTimeout };
       }
     }]);
 
@@ -220,15 +239,13 @@ function Bridge(_ref4) {
   }())();
 }
 
-module.exports = function (_ref6) {
-  var _ref6$timeout = _ref6.timeout;
-  var timeout = _ref6$timeout === undefined ? 1000 : _ref6$timeout;
-  var _ref6$send = _ref6.send;
-  var send = _ref6$send === undefined ? function () {} : _ref6$send;
-  var _ref6$setTimeout = _ref6.setTimeout;
-  var setTimeout = _ref6$setTimeout === undefined ? typeof setTimeout === 'function' ? setTimeout : (typeof window === 'undefined' ? 'undefined' : _typeof(window)) === 'object' ? window.setTimeout : global.setTimeout : _ref6$setTimeout;
-  var _ref6$clearTimeout = _ref6.clearTimeout;
-  var clearTimeout = _ref6$clearTimeout === undefined ? typeof clearTimeout === 'function' ? clearTimeout : (typeof window === 'undefined' ? 'undefined' : _typeof(window)) === 'object' ? window.clearTimeout : global.clearTimeout : _ref6$clearTimeout;
+module.exports = function (_ref5) {
+  var _ref5$defaultReceiptT = _ref5.defaultReceiptTimeout;
+  var defaultReceiptTimeout = _ref5$defaultReceiptT === undefined ? 1000 : _ref5$defaultReceiptT;
+  var _ref5$defaultRequestT = _ref5.defaultRequestTimeout;
+  var defaultRequestTimeout = _ref5$defaultRequestT === undefined ? 60 * 1000 : _ref5$defaultRequestT;
+  var _ref5$send = _ref5.send;
+  var send = _ref5$send === undefined ? function () {} : _ref5$send;
 
-  return new Bridge({ timeout: timeout, send: send, setTimeout: setTimeout, clearTimeout: clearTimeout });
+  return new Bridge({ defaultReceiptTimeout: defaultReceiptTimeout, defaultRequestTimeout: defaultRequestTimeout, send: send });
 };

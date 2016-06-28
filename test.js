@@ -6,59 +6,111 @@ const Bridge = require('./');
 
 require('babel-polyfill');
 
-let bridge0, bridge1, sendToBridge0, sendToBridge1;
+let bridge0, bridge1, sendToBridge0, sendToBridge1, sendToBridge0Hook, sendToBridge1Hook;
 
 beforeEach(() => {
-  sendToBridge0 = sinon.spy(message => bridge0.receive(message));
-  sendToBridge1 = sinon.spy(message => bridge1.receive(message));
-  bridge0 = Bridge({ send: sendToBridge1, timeout: 10 });
-  bridge1 = Bridge({ send: sendToBridge0, timeout: 10 });
+  sendToBridge0 = sinon.spy(message => sendToBridge0Hook(message));
+  sendToBridge1 = sinon.spy(message => sendToBridge1Hook(message));
+  sendToBridge0Hook = message => bridge0.receive(message);
+  sendToBridge1Hook = message => bridge1.receive(message);
+  bridge0 = Bridge({ send: sendToBridge1 });
+  bridge1 = Bridge({ send: sendToBridge0 });
 });
 
 describe('async bridge', () => {
-  describe('when bridge0 sets a responder to a request', () => {
-    beforeEach(() => bridge0.respond('test', () => 123));
+
+  describe('when bridge 1 sets a responder that responds quickly to a request', () => {
+
+    beforeEach(() => bridge1.respond('test', () => Promise.resolve(123)));
+
     describe('and bridge1 sends a request', () => {
-      it('bridge1 should get the response payload', () => {
-        return bridge1.request('test').then(response => {
-          if (response !== 123) throw new Error();
-        });
+
+      let response;
+
+      beforeEach(() => bridge0.request('test', 321).then(response_ => response = response_));
+
+      it('bridge 1 should get the the response payload', () => {
+        if (response !== 123) throw new Error();
       });
-      it('bridge0 should get the request payload', () => {
-        return bridge1.request('test', 321).then(() => {
-          if (sendToBridge0.args[0][0].payload !== 321) throw new Error();
-        });
+
+      it('bridge 0 should get the request payload', () => {
+        if (sendToBridge1.args[0][0].payload !== 321) throw new Error();
       });
+
     });
-  });
-  describe('when bridge0 responder doesnt resolve', () => {
-    beforeEach(() => bridge0.respond('test', () => new Promise(() => {})));
-    it('bridge1 should not resolve and timeout should be cleared', done => {
-      bridge1.request('test').then(() => done(new Error()), () => done(new Error()));
-      setTimeout(done, 100);
-    });
-  });
-  describe('when bridge0 doesnt have a responder', () => {
-    it('bridge1 should get an unhandled error', () => {
-      return bridge1.request('hello').then(() => { throw new Error(); }, error => {
-        if (!(error instanceof bridge1.exceptions.Unhandled)) throw new Error();
-      });
-    });
-  });
-  describe('when there is no bridge on the other side', () => {
-    const bridge = Bridge({ timeout: 10 });
-    it('should get a timeout error', () => {
-      return bridge.request('hello').then(() => { throw new Error(); }, error => {
-        if (!(error instanceof bridge.exceptions.Timeout)) throw new Error();
-      });
-    });
+
   });
 
-  describe('when timeout is huge', () => {
-    const bridge = Bridge({ timeout: 86400 * 1000 });
-    it('should not get a timeout error within a few seconds', done => {
-      bridge.request('hello').catch(() => {}).then(() => done(new Error()));
-      setTimeout(done, 1000);
+  describe('when bridge 1 sets a responder that doesnt resolve', () => {
+
+    beforeEach(() => bridge1.respond('test', () => new Promise(() => {})));
+
+    describe('and the default request timeout is short', () => {
+
+      let promise;
+      beforeEach(() => bridge0 = Bridge({ send: sendToBridge1, defaultRequestTimeout: 50 }));
+
+      describe('and bridge 0 sends a request', () => {
+
+        beforeEach(() => { promise = bridge0.request('test', 123).then(() => { throw new Error(); }); });
+
+        it('bridge 0 should receive a response timeout error', () => {
+          return promise.catch(error => { if (!(error instanceof bridge1.exceptions.RequestTimeout)) throw error; });
+        });
+
+      });
+
     });
+
+    describe('and the default request timeout is long', () => {
+
+      let promise;
+      beforeEach(() => bridge0 = Bridge({ send: sendToBridge1, defaultRequestTimeout: 15000 }));
+
+      describe('and bridge 0 sends a request with a short manual timeout', () => {
+
+        beforeEach(() => { promise = bridge0.request('test', 123, { requestTimeout: 50 }).then(() => { throw new Error(); }); });
+
+        it('bridge 0 should receive a request timeout error', () => {
+          return promise.catch(error => { if (!(error instanceof bridge0.exceptions.RequestTimeout)) throw error; });
+        });
+
+      });
+
+    });
+
   });
+
+  describe('when bridge 1 doesnt exist', () => {
+
+    beforeEach(() => sendToBridge1Hook = () => {});
+
+    describe('and bridge 0 sends a request', () => {
+
+      let promise;
+      beforeEach(() => { promise = bridge0.request('test').then(() => { throw new Error(); }); });
+
+      it('bridge 0 should get a receipt timeout', () => {
+        return promise.catch(error => { if (!(error instanceof bridge0.exceptions.ReceiptTimeout)) throw new Error(); });
+      });
+
+    });
+
+  });
+
+  describe('when bridge 1 doesnt handle a request', () => {
+
+    describe('and bridge 0 sends a request', () => {
+
+      let promise;
+      beforeEach(() => { promise = bridge0.request('test').then(() => { throw new Error(); }); });
+
+      it('bridge 0 should get an unhandled error', () => {
+        return promise.catch(error => { if (!(error instanceof bridge0.exceptions.Unhandled)) throw error; });
+      });
+
+    });
+
+  });
+
 });

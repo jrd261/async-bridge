@@ -8,35 +8,57 @@ class Unhandled {
   }
 }
 
-class Timeout {
+class __UnhandledInternal__ {
   constructor () {
-    this.name = 'Timeout';
-    this.message = 'The request timed out.';
+    this.name = '__UnhandledInternal__';
+    this.message = 'The request was unhandled';
     this.stack = (new Error()).stack;
   }
 }
 
-function Request ({ timeout, setTimeout, clearTimeout }) {
+
+class ReceiptTimeout {
+  constructor () {
+    this.name = 'ReceiptTimeout';
+    this.message = 'The request timed out waiting for a receipt.';
+    this.stack = (new Error()).stack;
+  }
+}
+
+class RequestTimeout {
+  constructor () {
+    this.name = 'RequestTimeout';
+    this.message = 'The request timed out waiting for a response';
+    this.stack = (new Error()).stack;
+  }
+}
+
+
+function Request ({ receiptTimeout, requestTimeout }) {
 
   let resolve, reject;
   const promise = new Promise((a, b) => { resolve = a; reject = b; });
-  const timeout_ = setTimeout(() => reject(new Timeout()), timeout);
 
-  function onReceipt () { clearTimeout(timeout_); }
-  function onResponse ({ payload }) { resolve(payload); }
-
-  function onError ({ name, message }) {
-    if (name === 'Unhandled') return reject(new Unhandled());
-    const error = new Error();
-    error.name = name;
-    error.message = message;
-    reject(error);
-  }
+  const receiptTimeoutId = setTimeout(() => reject(new ReceiptTimeout()), receiptTimeout);
+  const requestTimeoutId = setTimeout(() => reject(new RequestTimeout()), requestTimeout);
 
   function receive (message) {
-    if (message.type === 'receipt') onReceipt(message);
-    else if (message.type === 'response') onResponse(message);
-    else if (message.type === 'error') onError(message);
+    const { type, payload } = message;
+    if (type === 'receipt') {
+      clearTimeout(receiptTimeoutId);
+    } else if (type === 'response') {
+      clearTimeout(requestTimeoutId);
+      resolve(payload);
+    } else if (type === 'error') {
+      if (message.name === '__UnhandledInternal__') {
+        reject(new Unhandled());
+      } else {
+        const error = new Error();
+        error.name = message.name;
+        error.message = message.message;
+        reject(error);
+      }
+    }
   }
 
   return new (class {
@@ -46,14 +68,14 @@ function Request ({ timeout, setTimeout, clearTimeout }) {
 
 }
 
-function Bridge ({ timeout, send, setTimeout, clearTimeout }) {
+function Bridge ({ defaultReceiptTimeout, defaultRequestTimeout, send }) {
 
   const requests = new Map();
   const handlers = new Map();
 
-  async function request (name, payload) {
+  async function request (name, payload, { receiptTimeout=defaultReceiptTimeout, requestTimeout=defaultRequestTimeout }) {
     const id = Math.random();
-    const request = new Request({ timeout, setTimeout, clearTimeout });
+    const request = new Request({ receiptTimeout, requestTimeout });
     requests.set(id, request);
     send({ id, name, payload, type: 'request' });
     try {
@@ -66,7 +88,7 @@ function Bridge ({ timeout, send, setTimeout, clearTimeout }) {
   }
 
   async function onRequest ({ id, name, payload }) {
-    const handler = handlers.get(name) || (() => { throw new Unhandled(); });
+    const handler = handlers.get(name) || (() => { throw new __UnhandledInternal__(); });
     let response;
     send({ id, type: 'receipt' });
     try { response = await handler(payload); }
@@ -84,19 +106,18 @@ function Bridge ({ timeout, send, setTimeout, clearTimeout }) {
   }
 
   return new (class {
-    request (name, payload) { return request(name, payload); }
+    request (name, payload, options={}) { return request(name, payload, options); }
     respond (name, callback) { handlers.set(name, callback); }
     get receive () { return receive; }
-    get exceptions () { return { Unhandled, Timeout }; }
+    get exceptions () { return { Unhandled, ReceiptTimeout, RequestTimeout }; }
   })();
 
 }
 
 module.exports = function ({
-  timeout = 1000,
-  send = () => {},
-  setTimeout = typeof setTimeout === 'function' ? setTimeout : (typeof window === 'object' ? window.setTimeout : global.setTimeout),
-  clearTimeout = typeof clearTimeout === 'function' ? clearTimeout : (typeof window === 'object' ? window.clearTimeout : global.clearTimeout)
+  defaultReceiptTimeout = 1000,
+  defaultRequestTimeout = 60 * 1000,
+  send = () => {}
 }) {
-  return new Bridge({ timeout, send, setTimeout, clearTimeout });
+  return new Bridge({ defaultReceiptTimeout, defaultRequestTimeout, send });
 };
