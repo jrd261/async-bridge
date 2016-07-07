@@ -13,8 +13,8 @@ beforeEach(() => {
   sendToBridge1 = sinon.spy(message => sendToBridge1Hook(message));
   sendToBridge0Hook = message => bridge0.receive(message);
   sendToBridge1Hook = message => bridge1.receive(message);
-  bridge0 = Bridge({ send: sendToBridge1 });
-  bridge1 = Bridge({ send: sendToBridge0 });
+  bridge0 = Bridge(sendToBridge1);
+  bridge1 = Bridge(sendToBridge0);
 });
 
 describe('async bridge', () => {
@@ -45,34 +45,34 @@ describe('async bridge', () => {
 
     beforeEach(() => bridge1.respond('test', () => new Promise(() => {})));
 
-    describe('and the default request timeout is short', () => {
+    describe('and the default response timeout is short', () => {
 
       let promise;
-      beforeEach(() => bridge0 = Bridge({ send: sendToBridge1, defaultRequestTimeout: 50 }));
+      beforeEach(() => bridge0 = Bridge(sendToBridge1, { timeouts: { response: 50 }}));
 
       describe('and bridge 0 sends a request', () => {
 
         beforeEach(() => { promise = bridge0.request('test', 123).then(() => { throw new Error(); }); });
 
         it('bridge 0 should receive a response timeout error', () => {
-          return promise.catch(error => { if (!(error instanceof bridge1.exceptions.RequestTimeout)) throw error; });
+          return promise.catch(error => { if (!(error instanceof bridge1.exceptions.ResponseTimeout)) throw error; });
         });
 
       });
 
     });
 
-    describe('and the default request timeout is long', () => {
+    describe('and the default response timeout is long', () => {
 
       let promise;
-      beforeEach(() => bridge0 = Bridge({ send: sendToBridge1, defaultRequestTimeout: 15000 }));
+      beforeEach(() => bridge0 = Bridge(sendToBridge1, { timeouts: { response: 15000 }}));
 
       describe('and bridge 0 sends a request with a short manual timeout', () => {
 
-        beforeEach(() => { promise = bridge0.request('test', 123, { requestTimeout: 50 }).then(() => { throw new Error(); }); });
+        beforeEach(() => { promise = bridge0.request('test', 123, { timeouts: { response: 50 }}).then(() => { throw new Error(); }); });
 
         it('bridge 0 should receive a request timeout error', () => {
-          return promise.catch(error => { if (!(error instanceof bridge0.exceptions.RequestTimeout)) throw error; });
+          return promise.catch(error => { if (!(error instanceof bridge0.exceptions.ResponseTimeout)) throw error; });
         });
 
       });

@@ -30,17 +30,26 @@ var ReceiptTimeout = function ReceiptTimeout() {
   this.stack = new Error().stack;
 };
 
-var RequestTimeout = function RequestTimeout() {
-  _classCallCheck(this, RequestTimeout);
+var ResponseTimeout = function ResponseTimeout() {
+  _classCallCheck(this, ResponseTimeout);
 
   this.name = 'RequestTimeout';
   this.message = 'The request timed out waiting for a response';
   this.stack = new Error().stack;
 };
 
+function parseTimeout(timeout, default_) {
+  if (timeout === undefined) return default_;
+  if (typeof timeout !== 'number' || isNaN(timeout) || !isFinite(timeout)) {
+    throw new TypeError('Timeout must be a finite number.');
+  } else if (timeout < 0) {
+    throw new RangeError('Timeout must be a positive number.');
+  }
+  return timeout;
+}
+
 function Request(_ref) {
-  var receiptTimeout = _ref.receiptTimeout;
-  var requestTimeout = _ref.requestTimeout;
+  var timeouts = _ref.timeouts;
 
 
   var resolve = void 0,
@@ -49,21 +58,21 @@ function Request(_ref) {
     resolve = a;reject = b;
   });
 
-  var receiptTimeoutId = setTimeout(function () {
+  var receiptTimeout = setTimeout(function () {
     return reject(new ReceiptTimeout());
-  }, receiptTimeout);
-  var requestTimeoutId = setTimeout(function () {
-    return reject(new RequestTimeout());
-  }, requestTimeout);
+  }, timeouts.receipt);
+  var responseTimeout = setTimeout(function () {
+    return reject(new ResponseTimeout());
+  }, timeouts.response);
 
   function _receive(message) {
     var type = message.type;
     var payload = message.payload;
 
     if (type === 'receipt') {
-      clearTimeout(receiptTimeoutId);
+      clearTimeout(receiptTimeout);
     } else if (type === 'response') {
-      clearTimeout(requestTimeoutId);
+      clearTimeout(responseTimeout);
       resolve(payload);
     } else if (type === 'error') {
       if (message.name === '__UnhandledInternal__') {
@@ -98,47 +107,47 @@ function Request(_ref) {
   }())();
 }
 
-function Bridge(_ref2) {
+function Bridge(send, options_) {
   var _request = function () {
-    var ref = _asyncToGenerator(regeneratorRuntime.mark(function _callee(name, payload, _ref3) {
-      var _ref3$receiptTimeout = _ref3.receiptTimeout;
-      var receiptTimeout = _ref3$receiptTimeout === undefined ? defaultReceiptTimeout : _ref3$receiptTimeout;
-      var _ref3$requestTimeout = _ref3.requestTimeout;
-      var requestTimeout = _ref3$requestTimeout === undefined ? defaultRequestTimeout : _ref3$requestTimeout;
+    var ref = _asyncToGenerator(regeneratorRuntime.mark(function _callee(name, payload, options) {
       var id, request;
       return regeneratorRuntime.wrap(function _callee$(_context) {
         while (1) {
           switch (_context.prev = _context.next) {
             case 0:
+              options = options || {};
+              options.timeouts = options.timeouts || {};
+              options.timeouts.receipt = parseTimeout(options.timeouts.receipt, options_.timeouts.receipt);
+              options.timeouts.response = parseTimeout(options.timeouts.response, options_.timeouts.response);
               id = Math.random();
-              request = new Request({ receiptTimeout: receiptTimeout, requestTimeout: requestTimeout });
+              request = new Request(options);
 
               requests.set(id, request);
               send({ id: id, name: name, payload: payload, type: 'request' });
-              _context.prev = 4;
-              _context.next = 7;
+              _context.prev = 8;
+              _context.next = 11;
               return request.wait();
 
-            case 7:
+            case 11:
               return _context.abrupt('return', _context.sent);
 
-            case 10:
-              _context.prev = 10;
-              _context.t0 = _context['catch'](4);
+            case 14:
+              _context.prev = 14;
+              _context.t0 = _context['catch'](8);
               throw _context.t0;
 
-            case 13:
-              _context.prev = 13;
+            case 17:
+              _context.prev = 17;
 
               requests.delete(id);
-              return _context.finish(13);
+              return _context.finish(17);
 
-            case 16:
+            case 20:
             case 'end':
               return _context.stop();
           }
         }
-      }, _callee, this, [[4, 10, 13, 16]]);
+      }, _callee, this, [[8, 14, 17, 20]]);
     }));
 
     return function _request(_x, _x2, _x3) {
@@ -147,20 +156,20 @@ function Bridge(_ref2) {
   }();
 
   var onRequest = function () {
-    var ref = _asyncToGenerator(regeneratorRuntime.mark(function _callee2(_ref4) {
-      var id = _ref4.id;
-      var name = _ref4.name;
-      var payload = _ref4.payload;
-      var handler, response;
+    var ref = _asyncToGenerator(regeneratorRuntime.mark(function _callee2(_ref2) {
+      var id = _ref2.id;
+      var name = _ref2.name;
+      var payload = _ref2.payload;
+      var response, handler;
       return regeneratorRuntime.wrap(function _callee2$(_context2) {
         while (1) {
           switch (_context2.prev = _context2.next) {
             case 0:
+              response = void 0;
+
               handler = handlers.get(name) || function () {
                 throw new __UnhandledInternal__();
               };
-
-              response = void 0;
 
               send({ id: id, type: 'receipt' });
               _context2.prev = 3;
@@ -195,11 +204,6 @@ function Bridge(_ref2) {
     };
   }();
 
-  var defaultReceiptTimeout = _ref2.defaultReceiptTimeout;
-  var defaultRequestTimeout = _ref2.defaultRequestTimeout;
-  var send = _ref2.send;
-
-
   var requests = new Map();
   var handlers = new Map();
 
@@ -214,8 +218,7 @@ function Bridge(_ref2) {
 
     _createClass(_class2, [{
       key: 'request',
-      value: function request(name, payload) {
-        var options = arguments.length <= 2 || arguments[2] === undefined ? {} : arguments[2];
+      value: function request(name, payload, options) {
         return _request(name, payload, options);
       }
     }, {
@@ -231,7 +234,7 @@ function Bridge(_ref2) {
     }, {
       key: 'exceptions',
       get: function get() {
-        return { Unhandled: Unhandled, ReceiptTimeout: ReceiptTimeout, RequestTimeout: RequestTimeout };
+        return { Unhandled: Unhandled, ReceiptTimeout: ReceiptTimeout, ResponseTimeout: ResponseTimeout };
       }
     }]);
 
@@ -239,13 +242,11 @@ function Bridge(_ref2) {
   }())();
 }
 
-module.exports = function (_ref5) {
-  var _ref5$defaultReceiptT = _ref5.defaultReceiptTimeout;
-  var defaultReceiptTimeout = _ref5$defaultReceiptT === undefined ? 1000 : _ref5$defaultReceiptT;
-  var _ref5$defaultRequestT = _ref5.defaultRequestTimeout;
-  var defaultRequestTimeout = _ref5$defaultRequestT === undefined ? 60 * 1000 : _ref5$defaultRequestT;
-  var _ref5$send = _ref5.send;
-  var send = _ref5$send === undefined ? function () {} : _ref5$send;
-
-  return new Bridge({ defaultReceiptTimeout: defaultReceiptTimeout, defaultRequestTimeout: defaultRequestTimeout, send: send });
+module.exports = function (send, options) {
+  if (typeof send !== 'function') throw new TypeError('Send must be a function.');
+  options = options || {};
+  options.timeouts = options.timeouts || {};
+  options.timeouts.receipt = parseTimeout(options.timeouts.receipt, 1000);
+  options.timeouts.response = parseTimeout(options.timeouts.response, 60 * 1000);
+  return new Bridge(send, options);
 };

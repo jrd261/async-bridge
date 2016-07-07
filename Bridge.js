@@ -25,7 +25,7 @@ class ReceiptTimeout {
   }
 }
 
-class RequestTimeout {
+class ResponseTimeout {
   constructor () {
     this.name = 'RequestTimeout';
     this.message = 'The request timed out waiting for a response';
@@ -33,21 +33,31 @@ class RequestTimeout {
   }
 }
 
+function parseTimeout(timeout, default_) {
+  if (timeout === undefined) return default_;
+  if (typeof timeout !== 'number' || isNaN(timeout) || !isFinite(timeout)) {
+    throw new TypeError('Timeout must be a finite number.');
+  } else if (timeout < 0) {
+    throw new RangeError('Timeout must be a positive number.');
+  }
+  return timeout;
+}
 
-function Request ({ receiptTimeout, requestTimeout }) {
+
+function Request ({ timeouts }) {
 
   let resolve, reject;
   const promise = new Promise((a, b) => { resolve = a; reject = b; });
 
-  const receiptTimeoutId = setTimeout(() => reject(new ReceiptTimeout()), receiptTimeout);
-  const requestTimeoutId = setTimeout(() => reject(new RequestTimeout()), requestTimeout);
+  const receiptTimeout = setTimeout(() => reject(new ReceiptTimeout()), timeouts.receipt);
+  const responseTimeout = setTimeout(() => reject(new ResponseTimeout()), timeouts.response);
 
   function receive (message) {
     const { type, payload } = message;
     if (type === 'receipt') {
-      clearTimeout(receiptTimeoutId);
+      clearTimeout(receiptTimeout);
     } else if (type === 'response') {
-      clearTimeout(requestTimeoutId);
+      clearTimeout(responseTimeout);
       resolve(payload);
     } else if (type === 'error') {
       if (message.name === '__UnhandledInternal__') {
@@ -68,14 +78,18 @@ function Request ({ receiptTimeout, requestTimeout }) {
 
 }
 
-function Bridge ({ defaultReceiptTimeout, defaultRequestTimeout, send }) {
+function Bridge (send, options_) {
 
   const requests = new Map();
   const handlers = new Map();
 
-  async function request (name, payload, { receiptTimeout=defaultReceiptTimeout, requestTimeout=defaultRequestTimeout }) {
+  async function request (name, payload, options) {
+    options = options || {};
+    options.timeouts = options.timeouts || {};
+    options.timeouts.receipt = parseTimeout(options.timeouts.receipt, options_.timeouts.receipt);
+    options.timeouts.response = parseTimeout(options.timeouts.response, options_.timeouts.response);
     const id = Math.random();
-    const request = new Request({ receiptTimeout, requestTimeout });
+    const request = new Request(options);
     requests.set(id, request);
     send({ id, name, payload, type: 'request' });
     try {
@@ -88,8 +102,8 @@ function Bridge ({ defaultReceiptTimeout, defaultRequestTimeout, send }) {
   }
 
   async function onRequest ({ id, name, payload }) {
-    const handler = handlers.get(name) || (() => { throw new __UnhandledInternal__(); });
     let response;
+    const handler = handlers.get(name) || (() => { throw new __UnhandledInternal__(); });
     send({ id, type: 'receipt' });
     try { response = await handler(payload); }
     catch (error) {
@@ -106,18 +120,19 @@ function Bridge ({ defaultReceiptTimeout, defaultRequestTimeout, send }) {
   }
 
   return new (class {
-    request (name, payload, options={}) { return request(name, payload, options); }
+    request (name, payload, options) { return request(name, payload, options); }
     respond (name, callback) { handlers.set(name, callback); }
     get receive () { return receive; }
-    get exceptions () { return { Unhandled, ReceiptTimeout, RequestTimeout }; }
+    get exceptions () { return { Unhandled, ReceiptTimeout, ResponseTimeout }; }
   })();
 
 }
 
-module.exports = function ({
-  defaultReceiptTimeout = 1000,
-  defaultRequestTimeout = 60 * 1000,
-  send = () => {}
-}) {
-  return new Bridge({ defaultReceiptTimeout, defaultRequestTimeout, send });
+module.exports = function (send, options) {
+  if (typeof send !== 'function') throw new TypeError('Send must be a function.');
+  options = options || {};
+  options.timeouts = options.timeouts || {};
+  options.timeouts.receipt = parseTimeout(options.timeouts.receipt, 1000);
+  options.timeouts.response = parseTimeout(options.timeouts.response, 60 * 1000);
+  return new Bridge(send, options);
 };
