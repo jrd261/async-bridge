@@ -1,11 +1,9 @@
 {
   "name": "async-bridge",
-  "version": "0.0.4",
+  "version": "0.0.5",
   "description": "",
   "main": "index.js",
-  "dependencies": {
-    "lodash": "4.13.1"
-  },
+  "dependencies": {},
   "devDependencies": {
     "babel": "6.3.13",
     "babel-cli": "6.7.5",
