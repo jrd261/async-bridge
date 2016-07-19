@@ -5,6 +5,8 @@ module.exports = function (sender, handler) {
   if (typeof sender !== 'function') throw new TypeError('Sender must be a function.');
   if (typeof handler !== 'function') throw new TypeError('Handler must be a function.');
 
+  let count = 0;
+
   const records = new Map();
 
   // Workaround for instaceof Error.
@@ -27,53 +29,64 @@ module.exports = function (sender, handler) {
       this.name = name || 'Error';
       this.message = message || 'An error has occured.';
     }
-    
   }
 
   async function request (payload, timeout=5000) {
 
-    const id = Math.random();
+    count++;
+
     const record = {};
-    record.timeout = setTimeout(() => record.reject(new Timeout()), timeout);    
-    records.set(id, record);
+    record.id = count;
+    record.timeout = setTimeout(() => record.reject(new Timeout()), timeout);
 
-    const promise = new Promise((resolve, reject) => { record.resolve = resolve; record.reject = reject; });
+    const promise = new Promise((resolve, reject) => {
+      record.resolve = resolve;
+      record.reject = reject;
+    });
 
-    sender({ id, payload, type: 'request' });
-                                          
+    records.set(record.id, record);
+
     try {
+      sender([record.id, 'q', payload]);
       return await promise;
     } catch (error) {
       throw error;
     } finally {
       clearTimeout(record.timeout);
-      records.delete(id);
+      records.delete(record.id);
     }
 
   }
 
-  async function receive (message) {
-    if (!message || !message.id) return;
-    else if (message.type === 'request') {
-      sender({ id: message.id, type: 'receipt' });
-      try { 
-        sender({ id: message.id, type: 'response', payload: await handler(message.payload) });
-      } catch (error) {
-        try { 
-          sender({ id: message.id, type: 'error', error: { name: error.name, message: error.message }});
-        } catch (error) {
-          sender({ id: message.id, type: 'error', error: { name: 'Error', message: 'An unknown error has occured' }});
-        }
-      }
-    } else if (message.type === 'receipt') {
-      clearTimeout(records.get(message.id).timeouts.receipt);
-    } else if (message.type === 'response') {
-      records.get(message.id).resolve(message.payload); 
-    } else if (message.type === 'error') {
-      records.get(message.id).reject(new CustomError(message.error.name, message.error.message));
+  async function onRequest ([id,,payload]) {
+    let response;
+    try {
+      response = await handler(payload);
+    } catch (error) {
+      const { name, message } = (error || {});
+      return sender([id, 'e', [name || 'Error', message || 'An unknown error has ocured.']]);
     }
+    return sender([id, 's', response]);
   }
 
-  return { request, receive, Timeout };
+  function onResponse([id,,payload]) {
+    records.get(id).resolve(payload);
+  }
+
+  function onError ([id,,[name, message]]) {
+    records.get(id).reject(new CustomError(name, message));
+  }
+
+  async function receive ([,type]) {
+    if (type === 'q') onRequest(...arguments);
+    else if (type === 's') onResponse(...arguments);
+    else if (type === 'e') onError(...arguments);
+  }
+
+  return new (class {
+    request (payload, timeout) { return request (payload, timeout); }
+    receive (message) { return receive(message); }
+    get Timeout () { return Timeout; }
+  })();
 
 };
