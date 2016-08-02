@@ -1,8 +1,9 @@
 'use strict';
 
-module.exports = function (sender, handler) {
+module.exports = function (handler) {
 
-  if (typeof sender !== 'function') throw new TypeError('Sender must be a function.');
+  let emitter;
+
   if (typeof handler !== 'function') throw new TypeError('Handler must be a function.');
 
   let count = 0;
@@ -47,7 +48,7 @@ module.exports = function (sender, handler) {
     records.set(record.id, record);
 
     try {
-      sender([record.id, 'q', payload]);
+      emitter([record.id, 'q', payload]);
       return await promise;
     } catch (error) {
       throw error;
@@ -64,9 +65,9 @@ module.exports = function (sender, handler) {
       response = await handler(payload);
     } catch (error) {
       const { name, message } = (error || {});
-      return sender([id, 'e', [name || 'Error', message || 'An unknown error has ocured.']]);
+      return emitter([id, 'e', [name || 'Error', message || 'An unknown error has ocured.']]);
     }
-    return sender([id, 's', response]);
+    return emitter([id, 's', response]);
   }
 
   function onResponse([id,,payload]) {
@@ -86,6 +87,7 @@ module.exports = function (sender, handler) {
   return new (class {
     request (payload, timeout) { return request (payload, timeout); }
     receive (message) { return receive(message); }
+    set emitter (callback) { emitter = callback; }
     get Timeout () { return Timeout; }
   })();
 

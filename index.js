@@ -12,7 +12,7 @@ function _possibleConstructorReturn(self, call) { if (!self) { throw new Referen
 
 function _inherits(subClass, superClass) { if (typeof superClass !== "function" && superClass !== null) { throw new TypeError("Super expression must either be null or a function, not " + typeof superClass); } subClass.prototype = Object.create(superClass && superClass.prototype, { constructor: { value: subClass, enumerable: false, writable: true, configurable: true } }); if (superClass) Object.setPrototypeOf ? Object.setPrototypeOf(subClass, superClass) : subClass.__proto__ = superClass; }
 
-module.exports = function (sender, handler) {
+module.exports = function (handler) {
   var _request = function () {
     var ref = _asyncToGenerator(regeneratorRuntime.mark(function _callee(payload) {
       var timeout = arguments.length <= 1 || arguments[1] === undefined ? 5000 : arguments[1];
@@ -41,7 +41,7 @@ module.exports = function (sender, handler) {
 
               _context.prev = 6;
 
-              sender([record.id, 'q', payload]);
+              emitter([record.id, 'q', payload]);
               _context.next = 10;
               return promise;
 
@@ -102,10 +102,10 @@ module.exports = function (sender, handler) {
               _ref3 = _context2.t0 || {};
               name = _ref3.name;
               message = _ref3.message;
-              return _context2.abrupt('return', sender([id, 'e', [name || 'Error', message || 'An unknown error has ocured.']]));
+              return _context2.abrupt('return', emitter([id, 'e', [name || 'Error', message || 'An unknown error has ocured.']]));
 
             case 13:
-              return _context2.abrupt('return', sender([id, 's', response]));
+              return _context2.abrupt('return', emitter([id, 's', response]));
 
             case 14:
             case 'end':
@@ -145,7 +145,8 @@ module.exports = function (sender, handler) {
     };
   }();
 
-  if (typeof sender !== 'function') throw new TypeError('Sender must be a function.');
+  var emitter = void 0;
+
   if (typeof handler !== 'function') throw new TypeError('Handler must be a function.');
 
   var count = 0;
@@ -229,6 +230,11 @@ module.exports = function (sender, handler) {
       key: 'receive',
       value: function receive(message) {
         return _receive(message);
+      }
+    }, {
+      key: 'emitter',
+      set: function set(callback) {
+        emitter = callback;
       }
     }, {
       key: 'Timeout',
