@@ -9,59 +9,61 @@ function _classCallCheck(instance, Constructor) { if (!(instance instanceof Cons
 function _asyncToGenerator(fn) { return function () { var gen = fn.apply(this, arguments); return new Promise(function (resolve, reject) { function step(key, arg) { try { var info = gen[key](arg); var value = info.value; } catch (error) { reject(error); return; } if (info.done) { resolve(value); } else { return Promise.resolve(value).then(function (value) { return step("next", value); }, function (err) { return step("throw", err); }); } } return step("next"); }); }; }
 
 module.exports = {};
-module.exports.create = function (config) {
+module.exports.create = function () {
 
   // When connection sync message is received.
 
   var _request = function () {
     var ref = _asyncToGenerator(regeneratorRuntime.mark(function _callee(name, payload, timeout) {
-      var id, record, recordPromise, timeoutPromise, promise;
+      var id, record;
       return regeneratorRuntime.wrap(function _callee$(_context) {
         while (1) {
           switch (_context.prev = _context.next) {
             case 0:
-              id = Math.random();
+              id = Math.random().toString(36).slice(2);
               record = {};
 
+              record.name = name;
+              record.payload = payload;
+              record.receipt = Date.now();
 
-              outgoing.set(id, record);
-
-              recordPromise = new Promise(function (resolve, reject) {
+              record.promise = new Promise(function (resolve, reject) {
                 record.resolve = resolve;
                 record.reject = reject;
               });
-              timeoutPromise = new Promise(function (resolve, reject) {
-                setTimeout(function () {
-                  return reject('The request timed out.');
-                }, timeout);
-              });
-              promise = Promise.race([recordPromise, timeoutPromise]);
-              _context.prev = 6;
 
-              emitter(['q', id, name, payload]);
-              _context.next = 10;
-              return promise;
+              record.timeout = setTimeout(function () {
+                record.reject(new Error('The request timed out.'));
+              }, timeout);
 
-            case 10:
+              outgoing.set(id, record);
+
+              emit(['q', id, record.name, record.payload]);
+
+              _context.prev = 9;
+              _context.next = 12;
+              return record.promise;
+
+            case 12:
               return _context.abrupt('return', _context.sent);
 
-            case 13:
-              _context.prev = 13;
-              _context.t0 = _context['catch'](6);
+            case 15:
+              _context.prev = 15;
+              _context.t0 = _context['catch'](9);
               throw _context.t0;
 
-            case 16:
-              _context.prev = 16;
+            case 18:
+              _context.prev = 18;
 
               outgoing.delete(id);
-              return _context.finish(16);
+              return _context.finish(18);
 
-            case 19:
+            case 21:
             case 'end':
               return _context.stop();
           }
         }
-      }, _callee, this, [[6, 13, 16, 19]]);
+      }, _callee, this, [[9, 15, 18, 21]]);
     }));
 
     return function _request(_x, _x2, _x3) {
@@ -76,57 +78,59 @@ module.exports.create = function (config) {
       var id = _ref2[1];
       var name = _ref2[2];
       var payload = _ref2[3];
-      var handler, response, error;
+      var responder, response;
       return regeneratorRuntime.wrap(function _callee2$(_context2) {
         while (1) {
           switch (_context2.prev = _context2.next) {
             case 0:
-              handler = handlers.get(name);
-
-              if (handler) {
-                _context2.next = 3;
+              if (!incoming.has(id)) {
+                _context2.next = 2;
                 break;
               }
 
-              return _context2.abrupt('return', emitter(['e', id, 'No handler was set to respond to this request.']));
+              return _context2.abrupt('return');
 
-            case 3:
+            case 2:
+              responder = responders.get(name);
 
-              incoming.set(id, true);
+              if (responder) {
+                _context2.next = 5;
+                break;
+              }
+
+              return _context2.abrupt('return', emit(['e', id, 'No handler was set to respond to this request.']));
+
+            case 5:
+
+              incoming.add(id);
 
               response = void 0;
-              _context2.prev = 5;
-              _context2.next = 8;
-              return handler(payload);
+              _context2.prev = 7;
+              _context2.next = 10;
+              return responder(payload);
 
-            case 8:
+            case 10:
               response = _context2.sent;
-              _context2.next = 15;
+
+              emit(['p', id, response]);
+              _context2.next = 17;
               break;
 
-            case 11:
-              _context2.prev = 11;
-              _context2.t0 = _context2['catch'](5);
-              error = String(_context2.t0);
-              return _context2.abrupt('return', emitter(['e', id, error]));
+            case 14:
+              _context2.prev = 14;
+              _context2.t0 = _context2['catch'](7);
 
-            case 15:
-              _context2.prev = 15;
+              emit(['e', id, String(_context2.t0)]);
 
-              setTimeout(function () {
-                return incoming.delete(id);
-              }, 2 * config.interval);
-              return _context2.finish(15);
+            case 17:
+              incoming.delete(id);
 
             case 18:
-              return _context2.abrupt('return', emitter(['p', id, response]));
-
-            case 19:
             case 'end':
               return _context2.stop();
           }
         }
-      }, _callee2, this, [[5, 11, 15, 18]]);
+      }, _callee2, this, [[7, 14]]);
     }));
 
     return function onrequest(_x4) {
@@ -163,35 +167,16 @@ module.exports.create = function (config) {
     };
   }();
 
-  config = config || {};
-  config.interval = 2000;
-
-  var incoming = new Map();
+  var incoming = new Set();
   var outgoing = new Map();
-  var handlers = new Map();
+  var responders = new Map();
 
   var emitter = void 0;
 
-  var status = false;
-  var resolve = void 0;
-  var promise = new Promise(function (resolve_) {
-    return resolve = resolve_;
-  });
-  var timeout = void 0;
-
+  // Send other bridge list of known requests.
   function sync() {
-    emitter(['s', Array.from(incoming.keys())]);
-  }
-
-  // Sycronization interval.
-  setInterval(sync, config.interval);
-
-  // When connection times-out.
-  function ontimeout() {
-    status = false;
-    promise = new Promise(function (resolve_) {
-      return resolve = resolve_;
-    });
+    emit(['s', Array.from(incoming.keys())]);
+    var now = Date.now();
     var _iteratorNormalCompletion = true;
     var _didIteratorError = false;
     var _iteratorError = undefined;
@@ -203,8 +188,9 @@ module.exports.create = function (config) {
         var id = _step$value[0];
         var record = _step$value[1];
 
-        outgoing.delete(id);
-        record.reject(new Error('Bridge connection was lost.'));
+        if (now - record.receipt < 1000) continue;
+        console.warn('REEMITTED EVENT', record.name);
+        emit(['q', id, record.name, record.payload]);
       }
     } catch (err) {
       _didIteratorError = true;
@@ -221,6 +207,18 @@ module.exports.create = function (config) {
       }
     }
   }
+
+  function emit(data) {
+    if (!emitter) return;
+    try {
+      emitter(data);
+    } catch (error) {
+      // Swallow errors.
+    }
+  }
+
+  // Sycronization interval.
+  setInterval(sync, 500);
 
   function onresponse(_ref3) {
     var _ref4 = _slicedToArray(_ref3, 3);
@@ -245,21 +243,17 @@ module.exports.create = function (config) {
 
     var ids = _ref8[1];
 
-    status = true;
-    var remote = new Set(ids);
-    var local = new Set(outgoing.keys());
+    var now = Date.now();
     var _iteratorNormalCompletion2 = true;
     var _didIteratorError2 = false;
     var _iteratorError2 = undefined;
 
     try {
-      for (var _iterator2 = local[Symbol.iterator](), _step2; !(_iteratorNormalCompletion2 = (_step2 = _iterator2.next()).done); _iteratorNormalCompletion2 = true) {
+      for (var _iterator2 = ids[Symbol.iterator](), _step2; !(_iteratorNormalCompletion2 = (_step2 = _iterator2.next()).done); _iteratorNormalCompletion2 = true) {
         var id = _step2.value;
 
-        if (remote.has(id)) {
-          outgoing.get(id).reject(new Error('Bridge was reset. Request was lost.'));
-          outgoing.delete(id);
-        }
+        if (!outgoing.has(id)) continue;
+        outgoing.get(id).receipt = now;
       }
     } catch (err) {
       _didIteratorError2 = true;
@@ -275,10 +269,6 @@ module.exports.create = function (config) {
         }
       }
     }
-
-    resolve();
-    clearTimeout(timeout);
-    setTimeout(ontimeout, config.interval * 2);
   }
 
   return function () {
@@ -300,22 +290,12 @@ module.exports.create = function (config) {
     }, {
       key: 'respond',
       value: function respond(name, callback) {
-        handlers.set(name, callback);
-      }
-    }, {
-      key: 'wait',
-      value: function wait() {
-        return promise;
+        responders.set(name, callback);
       }
     }, {
       key: 'emitter',
       set: function set(callback) {
         emitter = callback;sync();
-      }
-    }, {
-      key: 'status',
-      get: function get() {
-        return status;
       }
     }]);
 

@@ -1,61 +1,62 @@
 'use strict';
 
 module.exports = {};
-module.exports.create = function (config) {
+module.exports.create = function () {
 
-  config = config || {};
-  config.interval = 2000;
-
-  const incoming = new Map();
+  const incoming = new Set();
   const outgoing = new Map();
-  const handlers = new Map();
+  const responders = new Map();
 
   let emitter;
 
-  let status = false;
-  let resolve;
-  let promise = new Promise(resolve_ => resolve = resolve_);
-  let timeout;
-
+  // Send other bridge list of known requests.
   function sync () {
-    emitter(['s', Array.from(incoming.keys())]);
-  }
-
-  // Sycronization interval.
-  setInterval(sync, config.interval);
-
-  // When connection times-out.
-  function ontimeout () {
-    status = false;
-    promise = new Promise(resolve_ => resolve = resolve_);
+    emit(['s', Array.from(incoming.keys())]);
+    const now = Date.now();
     for (let [id, record] of outgoing.entries()) {
-      outgoing.delete(id);
-      record.reject(new Error('Bridge connection was lost.'));
+      if (now - record.receipt < 1000) continue;
+      console.warn('REEMITTED EVENT', record.name);
+      emit(['q', id, record.name, record.payload]);
     }
   }
 
+  function emit (data) {
+    if (!emitter) return;
+    try {
+      emitter(data);
+    } catch (error) {
+      // Swallow errors.
+    }
+  }
+
+  // Sycronization interval.
+  setInterval(sync, 500);
+
   // When connection sync message is received.
   async function request (name, payload, timeout) {
-    
-    const id = Math.random();
+
+    const id = Math.random().toString(36).slice(2);
+
     const record = {};
-    
+    record.name = name;
+    record.payload = payload;
+    record.receipt = Date.now();
+
+    record.promise = new Promise((resolve, reject) => {
+      record.resolve = resolve;
+      record.reject = reject;
+    });
+
+    record.timeout = setTimeout(() => {
+      record.reject(new Error('The request timed out.'));
+    }, timeout);
+
     outgoing.set(id, record);
 
-    const recordPromise = new Promise((resolve, reject) => { 
-      record.resolve = resolve;
-      record.reject = reject; 
-    });
-
-    const timeoutPromise = new Promise((resolve, reject) => {
-      setTimeout(() => reject('The request timed out.'), timeout);
-    });
-
-    const promise = Promise.race([recordPromise, timeoutPromise]);
+    emit(['q', id, record.name, record.payload]);
 
     try {
-      emitter(['q', id, name, payload]);
-      return await promise;
+      return await record.promise;
     } catch (error) {
       throw error;
     } finally {
@@ -65,21 +66,24 @@ module.exports.create = function (config) {
   }
 
   async function onrequest ([ , id, name, payload]) {
-    const handler = handlers.get(name);
-    if (!handler) return emitter(['e', id, 'No handler was set to respond to this request.']);
 
-    incoming.set(id, true);
+    if (incoming.has(id)) return;
+
+    const responder = responders.get(name);
+
+    if (!responder) return emit(['e', id, 'No handler was set to respond to this request.']);
+
+    incoming.add(id);
 
     let response;
     try {
-      response = await handler(payload);
+      response = await responder(payload);
+      emit(['p', id, response]);
     } catch (error_) {
-      const error = String(error_);
-      return emitter(['e', id, error]);
-    } finally {
-      setTimeout(() => incoming.delete(id), 2 * config.interval);
+      emit(['e', id, String(error_)]);
     }
-    return emitter(['p', id, response]);
+    incoming.delete(id);
+
   }
 
   function onresponse([, id, payload]) {
@@ -91,18 +95,11 @@ module.exports.create = function (config) {
   }
 
   function onsync ([, ids]) {
-    status = true;
-    const remote = new Set(ids);
-    const local = new Set(outgoing.keys());
-    for (let id of local) {
-      if (remote.has(id)) {
-        outgoing.get(id).reject(new Error('Bridge was reset. Request was lost.'));
-        outgoing.delete(id);
-      }
+    const now = Date.now();
+    for (let id of ids) {
+      if (!outgoing.has(id)) continue;
+      outgoing.get(id).receipt = now;
     }
-    resolve();
-    clearTimeout(timeout);
-    setTimeout(ontimeout, config.interval * 2);
   }
 
   async function receive ([type]) {
@@ -119,10 +116,8 @@ module.exports.create = function (config) {
   return class {
     static request (name, payload, timeout=60000) { return request(name, payload, timeout); }
     static receive (data) { return receive(data); }
-    static respond (name, callback) { handlers.set(name, callback); }
+    static respond (name, callback) { responders.set(name, callback); }
     static set emitter (callback) { emitter = callback; sync(); }
-    static get status () { return status; }
-    static wait () { return promise; }
   };
 
 };
