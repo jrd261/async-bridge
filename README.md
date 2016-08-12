@@ -6,6 +6,7 @@ Generice promise based request/response interface. Intended for use with post-me
 
 # Example
 
+```javascript
 const Bridge = require('async-bridge');
 
 const bridge = Bridge.create();
@@ -18,7 +19,7 @@ bridge.respond('getRandomNumber', () => Math.random());
 
 // Timeout of 1s.
 bridge.request('hello?', { data: '123' }, 1000).then(response => {}).catch(error => {});
-
+```
 
 # Syncing
 
