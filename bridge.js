@@ -3,46 +3,25 @@
 module.exports = {};
 module.exports.create = function () {
 
+  let bridge;
+
   const incoming = new Set();
   const outgoing = new Map();
   const responders = new Map();
 
-  let emitter;
-
-  // Send other bridge list of known requests.
-  function sync () {
-    emit(['s', Array.from(incoming.keys())]);
-    const now = Date.now();
-    for (let [id, record] of outgoing.entries()) {
-      if (now - record.receipt < 1000) continue;
-      console.warn('REEMITTED EVENT', record.name);
-      emit(['q', id, record.name, record.payload]);
-    }
-  }
-
   function emit (data) {
-    if (!emitter) return;
-    try {
-      emitter(data);
-    } catch (error) {
-      // Swallow errors.
-    }
+    try { bridge.emitter(data); }
+    catch (error) { /* Swallow */ }
   }
 
-  // Sycronization interval.
-  setInterval(sync, 500);
+  /* Request and Respond */
 
-  // When connection sync message is received.
-  async function request (name, payload, timeout) {
+  async function request (name, payload, timeout=5000) {
 
     const id = Math.random().toString(36).slice(2);
 
-    const record = {};
-    record.name = name;
-    record.payload = payload;
-    record.receipt = Date.now();
-
-    record.promise = new Promise((resolve, reject) => {
+    const record = { name, payload };
+    const promise = new Promise((resolve, reject) => {
       record.resolve = resolve;
       record.reject = reject;
     });
@@ -56,7 +35,7 @@ module.exports.create = function () {
     emit(['q', id, record.name, record.payload]);
 
     try {
-      return await record.promise;
+      return await promise;
     } catch (error) {
       throw error;
     } finally {
@@ -65,59 +44,58 @@ module.exports.create = function () {
 
   }
 
-  async function onrequest ([ , id, name, payload]) {
+  function respond (name, callback) {
+    responders.set(name, callback);
+  }
 
-    if (incoming.has(id)) return;
 
-    const responder = responders.get(name);
+  /* Incoming Message Routing */
 
-    if (!responder) return emit(['e', id, 'No handler was set to respond to this request.']);
-
-    incoming.add(id);
-
-    let response;
-    try {
-      response = await responder(payload);
-      emit(['p', id, response]);
-    } catch (error_) {
-      emit(['e', id, String(error_)]);
+  async function receiver ([type, id, name, payload]) {
+    if (type === 'q') {
+      if (incoming.has(id)) return;
+      try {
+        incoming.add(id);
+        if (!responders.get(name)) throw new Error('No handler was set to respond to this request.');
+        emit(['s', id, null, await responders.get(name)(payload)]);
+        incoming.delete(id);
+      } catch (error) {
+        if (error instanceof Error) emit(['e', id, null, { name: error.name, message: error.message }]);
+        else emit(['e', id, null, error]);
+        incoming.delete(id);
+      }
     }
-    incoming.delete(id);
-
+    else if (type === 's') outgoing.get(id).resolve(payload);
+    else if (type === 'e') outgoing.get(id).reject(payload);
   }
 
-  function onresponse([, id, payload]) {
-    outgoing.get(id).resolve(payload);
-  }
+  /* Syncronization */
 
-  function onerror ([, id, error]) {
-    outgoing.get(id).reject(error);
-  }
-
-  function onsync ([, ids]) {
-    const now = Date.now();
-    for (let id of ids) {
-      if (!outgoing.has(id)) continue;
-      outgoing.get(id).receipt = now;
-    }
-  }
-
-  async function receive ([type]) {
-    try {
-      if (type === 'q') onrequest(...arguments);
-      else if (type === 'p') onresponse(...arguments);
-      else if (type === 'e') onerror(...arguments);
-      else if (type === 's') onsync(...arguments);
-    } catch (error) {
-      // no worries
+  function resend (ids) {
+    ids = new Set(ids);
+    for (let [id, record] of outgoing.entries()) {
+      if (!ids.has(id)) {
+        emit(['q', id, record.name, record.payload]);
+      }
     }
   }
 
-  return class {
-    static request (name, payload, timeout=60000) { return request(name, payload, timeout); }
-    static receive (data) { return receive(data); }
-    static respond (name, callback) { responders.set(name, callback); }
-    static set emitter (callback) { emitter = callback; sync(); }
-  };
+  function onsync (ids) {
+    resend(ids);
+    return Array.from(incoming.keys());
+  }
+
+  function sync (timeout=1000) {
+    return request('__sync__', Array.from(incoming.keys()), timeout).then(resend);
+  }
+
+  respond('__sync__', onsync);
+
+
+  /* Exports */
+
+  bridge = { sync, request, receiver, respond };
+
+  return bridge;
 
 };
