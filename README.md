@@ -11,15 +11,21 @@ const Bridge = require('async-bridge');
 
 const bridge = Bridge.create();
 
+// Bind incoming event data to the bridge.
 addEventListener('message', event => bridge.receiver(event.data));
 
+// Set an emitter for outgoing data.
 bridge.emitter = data => window.parent.postMessage(data, '*');
 
+// Register a response for a named request.
 bridge.respond('getRandomNumber', () => Math.random());
 
-// Timeout of 1s.
+// Send a request with a timeout of 1s.
 bridge.request('hello?', { data: '123' }, 1000).then(response => {}).catch(error => {});
 ```
+
+// Make sure the briges are in sync on an interval.
+setInterval(bridge.sync, 2000)
 
 # Syncing
 
