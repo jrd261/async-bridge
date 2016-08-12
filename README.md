@@ -1,5 +1,5 @@
 
-# Asyncrounous Bridge
+# Async Bridge
 
 Generic promise based request/response interface. Intended for use with post-messaging.
 
