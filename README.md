@@ -22,10 +22,11 @@ bridge.respond('getRandomNumber', () => Math.random());
 
 // Send a request with a timeout of 1s.
 bridge.request('hello?', { data: '123' }, 1000).then(response => {}).catch(error => {});
-```
 
 // Make sure the briges are in sync on an interval.
 setInterval(bridge.sync, 2000)
+
+```
 
 # Syncing
 
