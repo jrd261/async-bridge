@@ -1,7 +1,7 @@
 
 # Asyncrounous Bridge
 
-Generice promise based request/response interface. Intended for use with post-messaging.
+Generic promise based request/response interface. Intended for use with post-messaging.
 
 
 # Example
