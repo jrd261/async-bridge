@@ -51,7 +51,9 @@ module.exports.create = function () {
 
   /* Incoming Message Routing */
 
-  async function receiver ([type, id, name, payload]) {
+  async function receiver (data) {
+    if (!Array.isArray(data)) return;
+    const [type, id, name, payload] = data;
     if (type === 'q') {
       if (incoming.has(id)) return;
       try {
@@ -65,8 +67,11 @@ module.exports.create = function () {
         incoming.delete(id);
       }
     }
-    else if (type === 's') outgoing.get(id).resolve(payload);
-    else if (type === 'e') outgoing.get(id).reject(payload);
+    else if (type === 's') {
+      if (outgoing.has(id)) outgoing.get(id).resolve(payload);
+    } else if (type === 'e') {
+      if (outgoing.has(id)) outgoing.get(id).reject(payload);
+    }
   }
 
   /* Syncronization */
